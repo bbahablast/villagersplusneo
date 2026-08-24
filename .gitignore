@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+**/src/generated/
+
+# NeoForge / MinecraftDev run dirs
+run/
+runs/
+run-data/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+eclipse/
+
+# OS
+.DS_Store

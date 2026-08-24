@@ -1,0 +1,129 @@
+name: build
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-1201:
+    name: 1.20.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: 1.20.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Decompiling Minecraft needs more scratch space than the image leaves free.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY"
+          df -h /
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      # An un-reobfuscated jar builds and installs fine, then throws
+      # NoSuchMethodError on the first Minecraft call it makes.
+      - name: Check the jar is reobfuscated
+        run: |
+          jar=$(ls build/libs/villagersplus-1.20.1-*.jar | grep -v -- '-sources' | head -1)
+          unzip -l "$jar" com/lion/villagersplus/init/VPItems.class | grep -q VPItems \
+            || { echo "::error::VPItems.class not found in jar"; exit 1; }
+          if unzip -p "$jar" com/lion/villagersplus/init/VPItems.class | grep -aq 'm_135815_'; then
+            echo "ResourceLocation.getPath is SRG-named: jar is reobfuscated"
+          else
+            echo "::error::jar is NOT reobfuscated - VPItems still calls getPath(), which does not exist at runtime"
+            exit 1
+          fi
+
+      - name: Check the jar
+        run: |
+          jar=$(ls build/libs/villagersplus-1.20.1-*.jar | grep -v -- '-sources' | head -1)
+          echo "checking $jar"
+          unzip -p "$jar" META-INF/mods.toml
+
+          if unzip -p "$jar" META-INF/mods.toml | grep -q '\${'; then
+            echo "::error::mods.toml still has unexpanded placeholders"; exit 1
+          fi
+
+          for entry in \
+            META-INF/mods.toml \
+            pack.mcmeta \
+            com/lion/villagersplus/VillagersPlus.class \
+            data/villagersplus/recipes/alchemist_table.json \
+            data/villagersplus/loot_tables/blocks/alchemist_table.json \
+            data/villagersplus/tags/items/aquarium_plantable_items.json \
+            data/villagersplus/structures/village/plains/plains_alchemist.nbt \
+            data/villagersplus/default_villager_trades/alchemist.json \
+            data/minecraft/tags/point_of_interest_type/acquirable_job_site.json \
+            assets/villagersplus/lang/en_us.json
+          do
+            unzip -l "$jar" "$entry" | grep -q "$entry" \
+              || { echo "::error::missing $entry"; exit 1; }
+          done
+          echo "jar layout OK"
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: villagersplus-1.20.1-jar
+          path: 1.20.1/build/libs/*.jar
+          if-no-files-found: warn
+
+  build-1211:
+    name: 1.21.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: 1.21.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: villagersplus-1.21.1-jar
+          path: 1.21.1/build/libs/*.jar
+          if-no-files-found: warn
